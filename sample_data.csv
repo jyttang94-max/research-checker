@@ -1,0 +1,6 @@
+researcher_id,researcher_name,affiliation,project_name,support_start_date,support_end_date,due_date,expected_output_type,email,notes
+R001,김민영,A대학교 문학과,장원인문학자,2025-03-01,2027-02-28,2027-12-31,논문,test1@example.com,
+R002,남궁승원,B대학교 역사학과,장원인문학자,2025-03-01,2027-02-28,2027-12-31,저서,test2@example.com,
+R003,홍지수,C대학교 철학과,장원인문학자,2025-03-01,2027-02-28,2027-12-31,논문,test3@example.com,
+R004,이준호,D대학교 언어학과,장원인문학자,2025-03-01,2027-02-28,2027-12-31,논문,test4@example.com,
+R005,박소연,E대학교 미학과,장원인문학자,2025-03-01,2027-02-28,2027-12-31,저서,test5@example.com,
