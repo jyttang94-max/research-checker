@@ -763,7 +763,7 @@ else:
     # ========================================
     
     with tab6:
-        st.subheading("📈 기한 분석")
+        st.markdown("###"📈 기한 분석")
         
         if df_matching is not None:
             submitted_df = df_matching[df_matching['submission_status'] == '제출']
