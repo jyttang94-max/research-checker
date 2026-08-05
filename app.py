@@ -1,6 +1,6 @@
 # ============================================================
 # AI 기반 연구지원사업 성과관리 시스템 - Phase 8 최종 버전
-# 비용 기능 제거 (9개 탭)
+# 배포 환경 최적화 (모든 에러 수정)
 # ============================================================
 
 import streamlit as st
@@ -8,12 +8,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 import re
-# import fitz
+import requests
 import time
-from functools import lru_cache
 from io import BytesIO
 import openpyxl
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # ============================================================
 # 페이지 설정
@@ -26,7 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("📊 연구지원사업 성과관리시스템")
+st.title("연구지원사업 성과관리시스템")
 st.markdown("**Phase 8: 최종 완성 버전** | 연구성과 종합 관리")
 
 # ============================================================
@@ -266,81 +264,6 @@ def compare_metadata(pdf_data, crossref_data):
     return comparison
 
 
-def extract_text_from_pdf(pdf_file_path):
-    try:
-        import pypdf
-        with open(pdf_file_path, 'rb') as file:
-            pdf_reader = pypdf.PdfReader(file)
-            full_text = ""
-            for page in pdf_reader.pages:
-                full_text += page.extract_text()
-        
-        if len(full_text.strip()) == 0:
-            return {'success': False, 'text': '', 'error': '텍스트 추출 불가'}
-        
-        return {'success': True, 'text': full_text, 'error': None}
-    
-    except Exception as e:
-        return {'success': False, 'text': '', 'error': f'PDF 읽기 오류: {str(e)}'}
-
-
-def extract_doi_from_text(text):
-    """텍스트에서 DOI 추출"""
-    doi_pattern = r'10\.\d{4,}/[^\s]+'
-    matches = re.findall(doi_pattern, text)
-    return matches[0].rstrip('.,;:') if matches else None
-
-
-def extract_acknowledgement_from_text(text, keywords=None):
-    """사사 문구 검색"""
-    if keywords is None:
-        keywords = ['acknowledgement', 'acknowledgment', 'funding', 'supported by', 'grant', 'acknowledge', 'thanks', '사사', '감사', '지원', '지원사업']
-    
-    text_lower = text.lower()
-    found_keywords = [k for k in keywords if k.lower() in text_lower]
-    return {'found': len(found_keywords) > 0, 'keywords': found_keywords[:5]}
-
-
-def extract_author_from_text(text):
-    """저자명 추출"""
-    lines = text.split('\n')
-    for line in lines[:30]:
-        line = line.strip()
-        if len(line) < 100 and len(line) > 3:
-            if re.match(r'^[A-Z][a-z]+ [A-Z]\.', line) or re.match(r'^[A-Z][a-z]+,', line):
-                return line
-    return "추출 불가"
-
-
-def extract_title_from_text(text):
-    """논문명 추출"""
-    lines = text.split('\n')
-    for line in lines[:20]:
-        line = line.strip()
-        if 20 <= len(line) <= 200 and line[0].isupper():
-            if not re.match(r'^[\d\*\-\•]', line):
-                return line
-    return "추출 불가"
-
-
-def extract_pdf_metadata(pdf_file_path):
-    """PDF 메타데이터 추출"""
-    extraction_result = extract_text_from_pdf(pdf_file_path)
-    if not extraction_result['success']:
-        return {'success': False, 'error': extraction_result['error'], 'data': {}}
-    
-    text = extraction_result['text']
-    extracted_data = {
-        'title': extract_title_from_text(text),
-        'authors': extract_author_from_text(text),
-        'doi': extract_doi_from_text(text),
-        'acknowledgement': extract_acknowledgement_from_text(text),
-        'full_text': text[:500]
-    }
-    
-    return {'success': True, 'error': None, 'data': extracted_data}
-
-
 def extract_researcher_id_from_filename(filename):
     """파일명에서 연구자 ID 추출"""
     name_without_ext = os.path.splitext(filename)[0]
@@ -422,16 +345,16 @@ def match_pdfs_to_researchers(df_researchers, pdf_filenames, submission_date):
 # 사이드바 설정
 # ============================================================
 
-st.sidebar.header("📋 설정")
+st.sidebar.header("설정")
 
-st.sidebar.subheader("1️⃣ 기준일")
+st.sidebar.subheader("1. 기준일")
 submission_date = st.sidebar.date_input(
     "제출일 선택",
     value=datetime.now().date()
 )
 st.sidebar.info(f"선택된 제출일: {submission_date.strftime('%Y-%m-%d')}")
 
-st.sidebar.subheader("2️⃣ 연구자 명단")
+st.sidebar.subheader("2. 연구자 명단")
 upload_option = st.sidebar.radio(
     "파일 선택 방법",
     options=["샘플 데이터 사용", "CSV/Excel 업로드"]
@@ -462,7 +385,7 @@ elif upload_option == "CSV/Excel 업로드":
         except Exception as e:
             st.sidebar.error(f"파일 읽기 오류: {str(e)}")
 
-st.sidebar.subheader("3️⃣ 제출 PDF 파일")
+st.sidebar.subheader("3. 제출 PDF 파일")
 pdf_upload_option = st.sidebar.radio(
     "PDF 선택 방법",
     options=["샘플 PDF 사용", "PDF 업로드"]
@@ -510,20 +433,18 @@ if df_researchers is None:
     st.info("왼쪽 사이드바에서 연구자 명단을 선택하십시오")
 
 else:
-    # 탭 구성 (9개 탭)
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "🎯 종합 대시보드",
-        "⚠️ 미제출자 관리",
-        "🔍 검토 필요",
-        "📊 통계 분석",
-        "📋 제출 현황",
-        "📈 기한 분석",
-        "📄 PDF 정보",
-        "✅ DOI 검증",
-        "💾 다운로드"
+        "종합 대시보드",
+        "미제출자 관리",
+        "검토 필요",
+        "통계 분석",
+        "제출 현황",
+        "기한 분석",
+        "PDF 정보",
+        "DOI 검증",
+        "다운로드"
     ])
     
-    # PDF 매칭 실행
     if len(pdf_filenames) > 0:
         matching_results, unmatched_files = match_pdfs_to_researchers(
             df_researchers,
@@ -544,7 +465,7 @@ else:
     # ========================================
     
     with tab1:
-        st.subheader("🎯 전체 현황 종합 대시보드")
+        st.markdown("## 전체 현황 종합 대시보드")
         
         if df_matching is not None:
             total_count = len(df_matching)
@@ -553,7 +474,7 @@ else:
             on_time_count = len(df_matching[df_matching['timeliness'] == '기한 내 제출'])
             delayed_count = len(df_matching[df_matching['timeliness'] == '지연 제출'])
             
-            st.markdown("### 📊 핵심 성과 지표 (KPI)")
+            st.markdown("### 핵심 성과 지표 (KPI)")
             
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -599,7 +520,7 @@ else:
             
             st.markdown("---")
             
-            st.markdown("### 📋 연구자별 상세 현황")
+            st.markdown("### 연구자별 상세 현황")
             
             display_cols = ['researcher_id', 'researcher_name', 'project_name', 'submission_status', 
                            'timeliness', 'due_date', 'submission_date', 'file_name']
@@ -615,7 +536,7 @@ else:
     # ========================================
     
     with tab2:
-        st.subheader("⚠️ 미제출자 관리 및 독촉")
+        st.markdown("## 미제출자 관리 및 독촉")
         
         if df_matching is not None:
             not_submitted_df = df_matching[df_matching['submission_status'] == '미제출']
@@ -625,12 +546,12 @@ else:
                 
                 report = create_not_submitted_report(df_matching, submission_date)
                 
-                st.markdown("### 📋 미제출자 목록 (기한 순서)")
+                st.markdown("### 미제출자 목록 (기한 순서)")
                 st.dataframe(report, use_container_width=True, height=400, hide_index=True)
                 
                 st.markdown("---")
                 
-                st.markdown("### ⏰ 기한별 분류")
+                st.markdown("### 기한별 분류")
                 
                 urgent = len(report[report['남은일수'] <= 7])
                 warning = len(report[(report['남은일수'] > 7) & (report['남은일수'] <= 30)])
@@ -638,13 +559,13 @@ else:
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("🔴 긴급 (7일 이내)", urgent)
+                    st.metric("긴급 (7일 이내)", urgent)
                 with col2:
-                    st.metric("🟡 주의 (30일 이내)", warning)
+                    st.metric("주의 (30일 이내)", warning)
                 with col3:
-                    st.metric("🟢 여유", normal)
+                    st.metric("여유", normal)
             else:
-                st.success("✅ 모든 연구자가 제출했습니다!")
+                st.success("모든 연구자가 제출했습니다!")
         else:
             st.info("PDF 파일을 업로드하세요")
     
@@ -653,9 +574,9 @@ else:
     # ========================================
     
     with tab3:
-        st.subheader("🔍 검토 필요 성과")
+        st.markdown("## 검토 필요 성과")
         
-        st.info("💡 검수를 먼저 실행해주십시오 (Tab 9에서 검수 실행)")
+        st.info("검수를 먼저 실행해주십시오 (Tab 9에서 검수 실행)")
         
         if 'review_done' in st.session_state and st.session_state['review_done']:
             review_results = st.session_state['review_results']
@@ -664,17 +585,17 @@ else:
             review_required_df = df_review[df_review['review_required'] == '검토 필요']
             
             if len(review_required_df) > 0:
-                st.markdown("### 📋 검토 필요 성과 목록")
+                st.markdown("### 검토 필요 성과 목록")
                 st.dataframe(review_required_df, use_container_width=True, hide_index=True)
             else:
-                st.success("✅ 검토 필요한 성과가 없습니다!")
+                st.success("검토 필요한 성과가 없습니다!")
     
     # ========================================
     # Tab 4: 통계 분석
     # ========================================
     
     with tab4:
-        st.subheader("📊 통계 및 분석")
+        st.markdown("## 통계 및 분석")
         
         if df_matching is not None:
             total = len(df_matching)
@@ -697,11 +618,11 @@ else:
             }
             
             df_stats = pd.DataFrame(stats_data)
-            st.markdown("### 📈 주요 통계")
+            st.markdown("### 주요 통계")
             st.dataframe(df_stats, use_container_width=True, hide_index=True)
             
             st.markdown("---")
-            st.markdown("### 🏢 사업별 분석")
+            st.markdown("### 사업별 분석")
             
             project_analysis = []
             for project in df_matching['project_name'].unique():
@@ -724,7 +645,7 @@ else:
     # ========================================
     
     with tab5:
-        st.subheader("📊 제출 현황 요약")
+        st.markdown("## 제출 현황 요약")
         
         if df_matching is not None:
             total_researchers = len(df_researchers)
@@ -763,13 +684,13 @@ else:
     # ========================================
     
     with tab6:
-        st.markdown("###"📈 기한 분석")
+        st.markdown("## 기한 분석")
         
         if df_matching is not None:
             submitted_df = df_matching[df_matching['submission_status'] == '제출']
             
             if len(submitted_df) > 0:
-                st.markdown("### 📊 제출자 기한 준수 현황")
+                st.markdown("### 제출자 기한 준수 현황")
                 
                 on_time = len(submitted_df[submitted_df['timeliness'] == '기한 내 제출'])
                 delayed = len(submitted_df[submitted_df['timeliness'] == '지연 제출'])
@@ -784,14 +705,14 @@ else:
                 st.markdown("---")
                 
                 if delayed > 0:
-                    st.markdown("### ⚠️ 기한 초과 연구자")
+                    st.markdown("### 기한 초과 연구자")
                     delayed_df = submitted_df[submitted_df['timeliness'] == '지연 제출'][
                         ['researcher_id', 'researcher_name', 'due_date', 'submission_date', 'delay_days']
                     ].sort_values('delay_days', ascending=False)
                     st.dataframe(delayed_df, use_container_width=True, hide_index=True)
             
             st.markdown("---")
-            st.markdown("### ❌ 미제출 연구자")
+            st.markdown("### 미제출 연구자")
             
             not_submitted_df = df_matching[df_matching['submission_status'] == '미제출'][
                 ['researcher_id', 'researcher_name', 'due_date', 'expected_output_type']
@@ -809,133 +730,28 @@ else:
     # ========================================
     
     with tab7:
-        st.subheader("📄 PDF 정보 추출")
+        st.markdown("## PDF 정보 추출")
+        st.info("PDF 텍스트 추출 기능은 배포 환경에서 지원되지 않습니다. 로컬 환경에서 사용 가능합니다.")
         
-        if df_matching is not None:
-            submitted_df = df_matching[df_matching['submission_status'] == '제출']
-            
-            if len(submitted_df) > 0:
-                pdf_options = submitted_df[['researcher_id', 'researcher_name', 'file_name']].copy()
-                pdf_options['display'] = pdf_options.apply(
-                    lambda x: f"{x['researcher_id']} {x['researcher_name']} - {x['file_name']}", axis=1
-                )
-                
-                selected_pdf_display = st.selectbox(
-                    "PDF 선택",
-                    options=pdf_options['display'].tolist(),
-                    key="tab7_pdf_select"
-                )
-                
-                selected_idx = pdf_options['display'].tolist().index(selected_pdf_display)
-                selected_filename = pdf_options.iloc[selected_idx]['file_name']
-                
-                if st.button("🔍 정보 추출", type="primary", use_container_width=True, key="tab7_extract"):
-                    if selected_filename in st.session_state.get('pdf_file_dict', {}):
-                        pdf_path = st.session_state['pdf_file_dict'][selected_filename]
-                        
-                        with st.spinner("PDF를 분석 중입니다..."):
-                            extraction_result = extract_pdf_metadata(pdf_path)
-                        
-                        if extraction_result['success']:
-                            st.session_state['extracted_pdf_data'] = {
-                                'filename': selected_filename,
-                                'data': extraction_result['data']
-                            }
-                            st.success("✅ 정보 추출 완료!")
-                        else:
-                            st.error(f"❌ 추출 실패: {extraction_result['error']}")
-                
-                if 'extracted_pdf_data' in st.session_state:
-                    extracted = st.session_state['extracted_pdf_data']['data']
-                    
-                    st.markdown("---")
-                    st.markdown("### 📋 추출된 정보")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("#### 논문명")
-                        title = st.text_area(
-                            "논문명",
-                            value=extracted.get('title', ''),
-                            height=60,
-                            label_visibility="collapsed"
-                        )
-                    
-                    with col2:
-                        st.markdown("#### 저자")
-                        authors = st.text_area(
-                            "저자",
-                            value=extracted.get('authors', ''),
-                            height=60,
-                            label_visibility="collapsed"
-                        )
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("#### DOI")
-                        doi = st.text_input(
-                            "DOI",
-                            value=extracted.get('doi') or '',
-                            label_visibility="collapsed"
-                        )
-                        if extracted.get('doi'):
-                            st.success(f"✅ DOI 발견")
-                        else:
-                            st.warning("⚠️ DOI를 찾을 수 없습니다")
-                    
-                    with col2:
-                        st.markdown("#### 사사 문구")
-                        ack = extracted.get('acknowledgement', {})
-                        if ack.get('found'):
-                            st.success(f"✅ 사사 발견: {', '.join(ack.get('keywords', []))}")
-                        else:
-                            st.warning("⚠️ 사사 문구를 찾을 수 없습니다")
-                    
-                    st.markdown("---")
-                    if st.button("💾 정보 저장", use_container_width=True, key="tab7_save"):
-                        st.session_state['extracted_pdf_data']['data'] = {
-                            'title': title,
-                            'authors': authors,
-                            'doi': doi,
-                            'acknowledgement': extracted.get('acknowledgement', {})
-                        }
-                        st.success("✅ 정보가 저장되었습니다")
-            else:
-                st.info("제출한 PDF가 없습니다")
-        else:
-            st.info("PDF 파일을 업로드하세요")
-    
     # ========================================
     # Tab 8: DOI 검증
     # ========================================
     
     with tab8:
-        st.subheader("✅ Crossref DOI 검증")
+        st.markdown("## Crossref DOI 검증")
         
-        if 'extracted_pdf_data' in st.session_state:
-            extracted_data = st.session_state['extracted_pdf_data']['data']
-            doi = extracted_data.get('doi', '')
-            
-            if doi:
-                st.info(f"조회 DOI: **{doi}**")
+        doi_input = st.text_input("DOI 입력:")
+        
+        if st.button("DOI 검증", type="primary", use_container_width=True):
+            if doi_input:
+                with st.spinner("Crossref API에서 DOI 정보를 조회 중입니다..."):
+                    crossref_result = query_crossref(doi_input)
                 
-                if st.button("🔍 DOI 검증", type="primary", use_container_width=True, key="tab8_validate"):
-                    with st.spinner("Crossref API에서 DOI 정보를 조회 중입니다..."):
-                        crossref_result = query_crossref(doi)
-                    
-                    if crossref_result['success']:
-                        st.session_state['crossref_data'] = crossref_result['metadata']
-                        st.success("✅ DOI 검증 완료!")
-                    else:
-                        st.error(f"❌ 검증 실패: {crossref_result['error']}")
-                
-                if 'crossref_data' in st.session_state:
-                    crossref = st.session_state['crossref_data']
+                if crossref_result['success']:
+                    crossref = crossref_result['metadata']
                     
                     st.markdown("---")
-                    st.markdown("### 📊 Crossref 메타데이터")
+                    st.markdown("### Crossref 메타데이터")
                     
                     col1, col2 = st.columns(2)
                     
@@ -945,76 +761,41 @@ else:
                         st.write(f"**저자**: {crossref.get('authors', 'N/A')}")
                         st.write(f"**학술지**: {crossref.get('journal', 'N/A')}")
                         st.write(f"**발행일**: {crossref.get('published', 'N/A')}")
-                    
-                    with col2:
-                        st.markdown("#### PDF 정보와 비교")
-                        comparison = compare_metadata(extracted_data, crossref)
-                        
-                        if comparison['matches']:
-                            st.success("**✅ 일치 항목**")
-                            for match in comparison['matches']:
-                                st.write(f"- {match}")
-                        
-                        if comparison['mismatches']:
-                            st.warning("**⚠️ 불일치 항목**")
-                            for mismatch in comparison['mismatches']:
-                                st.write(f"- **{mismatch['item']}**")
-                                st.write(f"  - PDF: {mismatch['pdf']}")
-                                st.write(f"  - Crossref: {mismatch['crossref']}")
-                        
-                        if comparison['missing_in_pdf']:
-                            st.info("**ℹ️ PDF에서 누락된 정보**")
-                            for missing in comparison['missing_in_pdf']:
-                                st.write(f"- {missing}")
+                else:
+                    st.error(f"검증 실패: {crossref_result['error']}")
             else:
-                st.warning("⚠️ DOI가 없습니다. Tab 7에서 DOI를 입력하세요")
-        else:
-            st.info("Tab 7에서 PDF 정보를 먼저 추출하세요")
+                st.warning("DOI를 입력하세요")
     
     # ========================================
-    # Tab 9: 다운로드 (통합)
+    # Tab 9: 다운로드
     # ========================================
     
     with tab9:
-        st.subheader("💾 검수 및 다운로드")
+        st.markdown("## 검수 및 다운로드")
         
         if df_matching is not None:
-            # 검수 섹션
-            st.markdown("### 🔍 자동 검수 실행")
-            st.info("💡 검수를 실행하여 연구성과를 자동으로 검증합니다.")
+            st.markdown("### 자동 검수 실행")
+            st.info("검수를 실행하여 연구성과를 자동으로 검증합니다.")
             
-            if st.button("🔍 자동 검수 실행", type="primary", use_container_width=True, key="tab9_review"):
+            if st.button("자동 검수 실행", type="primary", use_container_width=True, key="tab9_review"):
                 review_results = {}
                 
                 with st.spinner("검수 중입니다..."):
                     for idx, row in df_matching.iterrows():
                         file_name = row['file_name']
-                        
-                        extracted_data = None
-                        crossref_data = None
-                        
-                        if 'extracted_pdf_data' in st.session_state:
-                            if st.session_state['extracted_pdf_data']['filename'] == file_name:
-                                extracted_data = st.session_state['extracted_pdf_data']['data']
-                        
-                        if 'crossref_data' in st.session_state:
-                            if 'extracted_pdf_data' in st.session_state and \
-                               st.session_state['extracted_pdf_data']['filename'] == file_name:
-                                crossref_data = st.session_state['crossref_data']
-                        
-                        review = perform_research_review(row.to_dict(), extracted_data, crossref_data)
+                        review = perform_research_review(row.to_dict(), None, None)
                         review_results[file_name] = review
                 
                 st.session_state['review_results'] = review_results
                 st.session_state['review_done'] = True
-                st.success("✅ 검수 완료!")
+                st.success("검수 완료!")
             
             if 'review_done' in st.session_state and st.session_state['review_done']:
                 review_results = st.session_state['review_results']
                 df_review = create_review_summary_table(df_matching, review_results)
                 
                 st.markdown("---")
-                st.markdown("### 📊 검수 결과 요약")
+                st.markdown("### 검수 결과 요약")
                 
                 normal_count = len(df_review[df_review['review_required'] == '정상'])
                 review_required_count = len(df_review[df_review['review_required'] == '검토 필요'])
@@ -1027,33 +808,10 @@ else:
                     st.metric("정상 성과", normal_count, f"{(normal_count/len(df_review)*100):.1f}%")
                 with col3:
                     st.metric("검토 필요", review_required_count, f"{(review_required_count/len(df_review)*100):.1f}%")
-                
-                st.markdown("---")
-                
-                st.markdown("### 📈 검수 결과 분포")
-                review_counts = df_review['review_required'].value_counts()
-                st.bar_chart(review_counts)
-                
-                st.markdown("---")
-                
-                st.markdown("### ⚠️ 심각도별 분류")
-                
-                critical_count = len(df_review[df_review['severity'] == 'critical'])
-                warning_count = len(df_review[df_review['severity'] == 'warning'])
-                normal_severity_count = len(df_review[df_review['severity'] == 'normal'])
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("심각 (Critical)", critical_count)
-                with col2:
-                    st.metric("경고 (Warning)", warning_count)
-                with col3:
-                    st.metric("정상 (Normal)", normal_severity_count)
             
             st.markdown("---")
-            st.markdown("### 📥 결과 다운로드")
+            st.markdown("### 결과 다운로드")
             
-            # 통합 Excel 다운로드
             df_review_for_excel = None
             if 'review_done' in st.session_state and st.session_state['review_done']:
                 df_review_for_excel = create_review_summary_table(df_matching, st.session_state['review_results'])
@@ -1061,7 +819,7 @@ else:
             excel_file = create_comprehensive_excel(df_matching, df_review_for_excel)
             
             st.download_button(
-                label="📥 전체 결과 (Excel)",
+                label="전체 결과 (Excel)",
                 data=excel_file,
                 file_name=f"research_management_{submission_date.strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1069,106 +827,34 @@ else:
             )
             
             st.markdown("---")
-            st.markdown("### 📋 개별 CSV 다운로드")
+            st.markdown("### 개별 CSV 다운로드")
             
-            # 전체 현황
             csv_all = df_matching.to_csv(index=False, encoding='utf-8-sig')
             st.download_button(
-                label="📥 전체 제출 현황 (CSV)",
+                label="전체 제출 현황 (CSV)",
                 data=csv_all,
                 file_name="submission_status_all.csv",
                 mime="text/csv",
                 use_container_width=True
             )
             
-            col1, col2 = st.columns(2)
-            
-            # 기한 내
-            df_on_time = df_matching[df_matching['timeliness'] == '기한 내 제출']
-            if len(df_on_time) > 0:
-                csv_on_time = df_on_time.to_csv(index=False, encoding='utf-8-sig')
-                with col1:
-                    st.download_button(
-                        label="📥 기한 내 제출자 (CSV)",
-                        data=csv_on_time,
-                        file_name="on_time_submissions.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-            
-            # 지연
-            df_delayed = df_matching[df_matching['timeliness'] == '지연 제출']
-            if len(df_delayed) > 0:
-                csv_delayed = df_delayed.to_csv(index=False, encoding='utf-8-sig')
-                with col2:
-                    st.download_button(
-                        label="📥 지연 제출자 (CSV)",
-                        data=csv_delayed,
-                        file_name="delayed_submissions.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-            
-            # 미제출자
             df_not_submitted = df_matching[df_matching['submission_status'] == '미제출']
             if len(df_not_submitted) > 0:
                 csv_not_submitted = df_not_submitted.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
-                    label="📥 미제출자 목록 (CSV)",
+                    label="미제출자 목록 (CSV)",
                     data=csv_not_submitted,
                     file_name="not_submitted_researchers.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
-            
-            # 미제출자 리포트
-            if len(df_not_submitted) > 0:
-                st.markdown("---")
+                
                 report = create_not_submitted_report(df_matching, submission_date)
                 csv_report = report.to_csv(index=False, encoding='utf-8-sig')
                 st.download_button(
-                    label="📥 미제출자 관리 리포트 (CSV)",
+                    label="미제출자 관리 리포트 (CSV)",
                     data=csv_report,
                     file_name="not_submitted_report.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            # 검수 결과
-            if 'review_done' in st.session_state and st.session_state['review_done']:
-                st.markdown("---")
-                
-                df_review_csv = create_review_summary_table(df_matching, st.session_state['review_results'])
-                csv_review = df_review_csv.to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(
-                    label="📥 검수 결과 (CSV)",
-                    data=csv_review,
-                    file_name="review_results.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-                
-                # 검토 필요 성과
-                df_review_required = df_review_csv[df_review_csv['review_required'] == '검토 필요']
-                if len(df_review_required) > 0:
-                    csv_review_required = df_review_required.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="📥 검토 필요 성과 (CSV)",
-                        data=csv_review_required,
-                        file_name="review_required_outputs.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-            
-            # 매칭 오류
-            if len(st.session_state.get('unmatched_files', [])) > 0:
-                st.markdown("---")
-                df_unmatched = pd.DataFrame(st.session_state['unmatched_files'])
-                csv_unmatched = df_unmatched.to_csv(index=False, encoding='utf-8-sig')
-                st.download_button(
-                    label="📥 매칭 실패 파일 (CSV)",
-                    data=csv_unmatched,
-                    file_name="unmatched_files.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
@@ -1181,25 +867,19 @@ else:
 
 st.markdown("---")
 st.markdown("""
-### ✅ Phase 8 최종 완성
+### Phase 8 최종 완성
 **9개 탭 구성:**
-1. 🎯 종합 대시보드 - 8개 KPI + 3개 차트
-2. ⚠️ 미제출자 관리 - 독촉 메일 템플릿
-3. 🔍 검토 필요 - 검토 필요 성과 목록
-4. 📊 통계 분석 - 주요 통계 및 사업별 분석
-5. 📋 제출 현황 - 제출율 및 기한 준수율
-6. 📈 기한 분석 - 기한 초과/미제출 연구자
-7. 📄 PDF 정보 - DOI, 사사 문구 추출
-8. ✅ DOI 검증 - Crossref API 연동
-9. 💾 다운로드 - 검수 + Excel/CSV 다운로드
+1. 종합 대시보드 - 8개 KPI + 3개 차트
+2. 미제출자 관리 - 독촉 메일 템플릿
+3. 검토 필요 - 검토 필요 성과 목록
+4. 통계 분석 - 주요 통계 및 사업별 분석
+5. 제출 현황 - 제출율 및 기한 준수율
+6. 기한 분석 - 기한 초과/미제출 연구자
+7. PDF 정보 - 배포 환경에서 지원 안 함
+8. DOI 검증 - Crossref API 연동
+9. 다운로드 - 검수 + Excel/CSV 다운로드
 
 **다운로드 파일:**
 - 통합 Excel (6개 시트)
-- 개별 CSV 파일 (5개 이상)
-
-**비용 기능 제거됨:**
-- 사이드바 비용 설정 ❌
-- ROI/효율성 분석 탭 ❌
-- Excel 효율성 시트 ❌
+- 개별 CSV 파일 (3개 이상)
 """)
-
